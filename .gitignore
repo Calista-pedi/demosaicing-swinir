@@ -1,0 +1,9 @@
+.codex
+__pycache__/
+*.pyc
+.DS_Store
+data/
+experiments/
+results/
+model_zoo/
+testsets/
