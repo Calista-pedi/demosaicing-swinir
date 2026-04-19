@@ -1,14 +1,15 @@
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Dict, List
-import re
 
 import numpy as np
 import torch
 from PIL import Image, ImageDraw
 
 from data.demosaic_rgb_dataset import (
+    VALID_BASE_PATTERNS,
     collect_image_paths,
     ensure_pattern_size,
     imread_rgb_float,
@@ -18,11 +19,11 @@ from models.network_swinir import SwinIR
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Visualize synthetic Bayer mosaic and SwinIR demosaicing results.")
+    parser = argparse.ArgumentParser(description="Visualize single-pattern SwinIR demosaicing results.")
     parser.add_argument("--model-path", type=str, required=True, help="Checkpoint path, e.g. model_best.pth")
     parser.add_argument("--input-path", type=str, required=True, help="Image file or image folder")
     parser.add_argument("--output-dir", type=str, default="results/demosaic_preview")
-    parser.add_argument("--pattern", type=str, default="", choices=["", "RGGB", "BGGR", "GRBG", "GBRG", "QRGGB"])
+    parser.add_argument("--pattern", type=str, default="", choices=["", *VALID_BASE_PATTERNS])
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--max-images", type=int, default=4)
     parser.add_argument("--error-scale", type=float, default=4.0)
@@ -57,6 +58,7 @@ def build_model_from_config(config: Dict, device: torch.device) -> SwinIR:
         img_size=config.get("crop_size", 128),
         patch_size=1,
         in_chans=3,
+        out_chans=3,
         embed_dim=config.get("embed_dim", 96),
         depths=config.get("depths", [6, 6, 6, 6]),
         num_heads=config.get("num_heads", [6, 6, 6, 6]),
@@ -84,10 +86,7 @@ def collect_inputs(input_path: Path, max_images: int) -> List[Path]:
         parts = re.split(r"(\d+)", path.stem)
         key = []
         for part in parts:
-            if part.isdigit():
-                key.append(int(part))
-            else:
-                key.append(part.lower())
+            key.append(int(part) if part.isdigit() else part.lower())
         key.append(path.suffix.lower())
         return key
 
@@ -121,13 +120,18 @@ def save_image(path: Path, image: np.ndarray):
 
 
 @torch.no_grad()
-def infer_one(model: SwinIR, image_path: Path, pattern: str, device: torch.device, error_scale: float):
+def infer_one(
+    model: SwinIR,
+    image_path: Path,
+    pattern: str,
+    device: torch.device,
+    error_scale: float,
+):
     gt = imread_rgb_float(image_path)
-    gt = ensure_pattern_size(gt, pattern)
+    gt = ensure_pattern_size(gt, "single")
     mosaic = rgb_to_masked_bayer_mosaic(gt, pattern)
 
-    lq_tensor = numpy_to_tensor(mosaic).to(device)
-    pred = model(lq_tensor)[0]
+    pred = model(numpy_to_tensor(mosaic).to(device))[0]
 
     gt_u8 = np.round(gt * 255.0).astype(np.uint8)
     mosaic_u8 = np.round(np.clip(mosaic, 0, 1) * 255.0).astype(np.uint8)
@@ -136,10 +140,17 @@ def infer_one(model: SwinIR, image_path: Path, pattern: str, device: torch.devic
     return gt_u8, mosaic_u8, pred_u8, error_u8
 
 
-def build_panel(gt: np.ndarray, mosaic: np.ndarray, pred: np.ndarray, error: np.ndarray, error_scale: float) -> np.ndarray:
+def build_panel(
+    gt: np.ndarray,
+    mosaic: np.ndarray,
+    pred: np.ndarray,
+    error: np.ndarray,
+    error_scale: float,
+    pattern: str,
+) -> np.ndarray:
     tiles = [
         add_title(gt, "GT"),
-        add_title(mosaic, "Mosaic"),
+        add_title(mosaic, f"Mosaic ({pattern})"),
         add_title(pred, "Demosaiced"),
         add_title(error, f"Error x{error_scale:g}"),
     ]
@@ -171,9 +182,15 @@ def main():
     print(f"Saving to: {output_dir}")
 
     for image_path in image_paths:
-        gt, mosaic, pred, error = infer_one(model, image_path, pattern, device, args.error_scale)
+        gt, mosaic, pred, error = infer_one(
+            model=model,
+            image_path=image_path,
+            pattern=pattern,
+            device=device,
+            error_scale=args.error_scale,
+        )
         stem = image_path.stem
-        panel = build_panel(gt, mosaic, pred, error, args.error_scale)
+        panel = build_panel(gt, mosaic, pred, error, args.error_scale, pattern)
         save_image(output_dir / f"{stem}_compare.png", panel)
 
         if args.save_individual:

@@ -643,7 +643,7 @@ class SwinIR(nn.Module):
         resi_connection: The convolutional block before residual connection. '1conv'/'3conv'
     """
 
-    def __init__(self, img_size=64, patch_size=1, in_chans=3,
+    def __init__(self, img_size=64, patch_size=1, in_chans=3, out_chans=None,
                  embed_dim=96, depths=[6, 6, 6, 6], num_heads=[6, 6, 6, 6],
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
@@ -652,8 +652,10 @@ class SwinIR(nn.Module):
                  **kwargs):
         super(SwinIR, self).__init__()
         num_in_ch = in_chans
-        num_out_ch = in_chans
+        num_out_ch = out_chans if out_chans is not None else in_chans
         num_feat = 64
+        self.num_in_ch = num_in_ch
+        self.num_out_ch = num_out_ch
         self.img_range = img_range
         if in_chans == 3:
             rgb_mean = (0.4488, 0.4371, 0.4040)
@@ -833,7 +835,11 @@ class SwinIR(nn.Module):
             # for image denoising and JPEG compression artifact reduction
             x_first = self.conv_first(x)
             res = self.conv_after_body(self.forward_features(x_first)) + x_first
-            x = x + self.conv_last(res)
+            restored = self.conv_last(res)
+            if self.num_in_ch == self.num_out_ch:
+                x = x + restored
+            else:
+                x = restored
 
         x = x / self.img_range + self.mean
 
@@ -842,12 +848,13 @@ class SwinIR(nn.Module):
     def flops(self):
         flops = 0
         H, W = self.patches_resolution
-        flops += H * W * 3 * self.embed_dim * 9
+        flops += H * W * self.num_in_ch * self.embed_dim * 9
         flops += self.patch_embed.flops()
         for i, layer in enumerate(self.layers):
             flops += layer.flops()
-        flops += H * W * 3 * self.embed_dim * self.embed_dim
-        flops += self.upsample.flops()
+        flops += H * W * self.num_out_ch * self.embed_dim * 9
+        if hasattr(self, 'upsample'):
+            flops += self.upsample.flops()
         return flops
 
 

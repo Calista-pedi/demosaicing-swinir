@@ -13,7 +13,7 @@ from utils import util_calculate_psnr_ssim as util
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, default='color_dn', help='classical_sr, lightweight_sr, real_sr, '
+    parser.add_argument(bash download-weights.sh'--task', type=str, default='color_dn', help='classical_sr, lightweight_sr, real_sr, '
                                                                      'gray_dn, color_dn, jpeg_car, color_jpeg_car')
     parser.add_argument('--scale', type=int, default=1, help='scale factor: 1, 2, 3, 4, 8') # 1 for dn and jpeg car
     parser.add_argument('--noise', type=int, default=15, help='noise level: 15, 25, 50')
@@ -223,7 +223,7 @@ def setup(args):
         border = 0
         window_size = 7
 
-    return folder, save_dir, border, window_size
+    return folder, save_dir, border, window_size    
 
 
 def get_image_pair(args, path):
